@@ -2,7 +2,7 @@ import React from 'react'
 
 const App = () => {
   return (
-    <div>CICD </div>
+    <div>CICD form Dev Branch </div>
   )
 }
 
