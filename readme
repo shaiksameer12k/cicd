@@ -1,0 +1,106 @@
+# CI/CD UAT Proof of Concept
+
+A minimal Node/Express API that proves out a full CI/CD pipeline: push code →
+automatically test → automatically deploy to a UAT server.
+
+## What this proves
+
+If this pipeline works, it demonstrates that your team can trust GitHub
+Actions to automatically build, test, and deploy code to UAT without a
+manual step — the same pattern can then be extended to your real projects.
+
+## Project structure
+
+```
+nodejs-cicd-poc/
+├── server.js                        # Express API (2 endpoints: /health, /api/status)
+├── test.js                          # Smoke test run by CI before deploy
+├── package.json
+└── .github/workflows/ci-cd-uat.yml  # The actual CI/CD pipeline definition
+```
+
+## One-time setup
+
+### 1. Prepare the UAT server (Linux, SSH access assumed)
+
+SSH into your UAT server and confirm Node.js and pm2 are installed:
+
+```bash
+node -v        # should be 18+
+npm install -g pm2
+```
+
+Create the app folder the pipeline will deploy into:
+
+```bash
+mkdir -p ~/apps/cicd-uat-poc
+```
+
+Open the port you plan to run on (default 3000) in your firewall/security
+group if it isn't already.
+
+### 2. Generate an SSH key for GitHub Actions to use
+
+On your own machine (not the UAT server):
+
+```bash
+ssh-keygen -t ed25519 -C "github-actions-deploy" -f ./uat_deploy_key
+```
+
+This creates two files: `uat_deploy_key` (private) and `uat_deploy_key.pub`
+(public).
+
+Copy the **public** key to the UAT server's authorized keys:
+
+```bash
+ssh-copy-id -i uat_deploy_key.pub youruser@your-uat-host
+```
+
+### 3. Add GitHub repo secrets
+
+In your GitHub repo: **Settings → Secrets and variables → Actions → New
+repository secret**. Add these four:
+
+| Secret name | Value |
+|---|---|
+| `UAT_HOST` | Your UAT server's IP or hostname |
+| `UAT_USERNAME` | SSH username on the UAT server |
+| `UAT_SSH_KEY` | Full contents of the **private** key file (`uat_deploy_key`) |
+| `UAT_PORT` | SSH port, usually `22` |
+
+### 4. Push to trigger it
+
+The pipeline runs automatically on every push to the `uat` branch:
+
+```bash
+git checkout -b uat
+git add .
+git commit -m "Initial CI/CD UAT POC"
+git push origin uat
+```
+
+Watch it run under the **Actions** tab in your GitHub repo.
+
+### 5. Verify the deployment worked
+
+Once the pipeline finishes, hit the UAT server directly:
+
+```bash
+curl http://your-uat-host:3000/api/status
+```
+
+You should see the current git commit SHA in the `version` field — proof
+that the exact code you pushed is what's now running on UAT.
+
+## Extending this POC
+
+Once this works end-to-end, the same pattern extends to a real project:
+
+- Swap `server.js` for your actual app
+- Add a real test suite (Jest, Mocha) in place of the smoke test
+- Add a build step if using TypeScript or a frontend bundler
+- Add a separate workflow file for production, gated behind manual approval
+- If your UAT server is Windows/IIS instead of Linux, replace the
+  scp/ssh-action steps with a Windows-compatible deploy method (e.g.
+  `web-deploy` / `msdeploy`, or a self-hosted Windows GitHub Actions
+  runner installed directly on the UAT box)

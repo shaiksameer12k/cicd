@@ -1,0 +1,70 @@
+name: CI/CD - Deploy to UAT
+
+# Runs automatically whenever code is pushed to the "uat" branch.
+# Change this to "main" if you want main to auto-deploy instead.
+on:
+  push:
+    branches:
+      - uat
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run smoke test
+        run: npm test
+
+  deploy-to-uat:
+    name: Deploy to UAT server
+    needs: build-and-test  # only runs if build-and-test succeeds
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Copies the project files to the UAT server over SSH/SCP.
+      # Requires these GitHub repo secrets to be set (Settings > Secrets and variables > Actions):
+      #   UAT_HOST      - server IP or hostname
+      #   UAT_USERNAME  - SSH username
+      #   UAT_SSH_KEY   - private SSH key (paste full contents, including BEGIN/END lines)
+      #   UAT_PORT      - SSH port (usually 22)
+      - name: Copy files to UAT server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.UAT_HOST }}
+          username: ${{ secrets.UAT_USERNAME }}
+          key: ${{ secrets.UAT_SSH_KEY }}
+          port: ${{ secrets.UAT_PORT }}
+          source: "."
+          target: "/home/${{ secrets.UAT_USERNAME }}/apps/cicd-uat-poc"
+          strip_components: 0
+
+      # Runs commands on the UAT server: install deps and restart the app via pm2.
+      # pm2 keeps the Node app running in the background and restarts it on crash.
+      - name: Install deps and restart app on UAT
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.UAT_HOST }}
+          username: ${{ secrets.UAT_USERNAME }}
+          key: ${{ secrets.UAT_SSH_KEY }}
+          port: ${{ secrets.UAT_PORT }}
+          script: |
+            cd /home/${{ secrets.UAT_USERNAME }}/apps/cicd-uat-poc
+            npm install --production --no-audit --no-fund
+            export APP_VERSION=${{ github.sha }}
+            export NODE_ENV=uat
+            pm2 restart cicd-uat-poc || pm2 start server.js --name cicd-uat-poc
+            pm2 save
